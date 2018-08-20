@@ -18,8 +18,8 @@ namespace SciTools
     /// 若不同，则结束当前进程，从ToolUrl_MD5中解析当前应用网络路径，下载并启动。Update.exe自删除。
     /// 
     /// 依赖工具类:
-    /// SciTools.WebTool.cs;
-    /// SciTools.EncoderTool_Alphabet.cs;
+    /// SciTools.WebTool.cs;                https://gitee.com/scimence/sciTools/raw/master/CS/WebTool.cs
+    /// SciTools.EncoderTool_Alphabet.cs;   https://gitee.com/scimence/sciTools/raw/master/CS/EncoderTool_Alphabet.cs 
     /// </summary>
     class UpdateTool
     {
