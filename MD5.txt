@@ -1,0 +1,11 @@
+﻿服务器资源目录(https://gitee.com/scimence/sciTools/raw/master/)
+本地资源目录(E:\tmp\sciTools\)
+
+待更新文件(
+
+README.md(0818ca500f4bca0cac690671a1ec33a)
+CS/ClearTool.cs(6942249506919eec0357281453208604)
+CS/DragDropTool.cs(b72508a707cb9895305b0dc45250460f)
+CS/ThreadTool.cs(589019226c4265b8a3eea05d4aaa323b)
+
+)待更新文件
