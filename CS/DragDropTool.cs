@@ -5,7 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace ClearDirectory
+namespace SciTools
 {
     /// <summary>
     /// 拖拽处理
@@ -23,14 +23,14 @@ namespace ClearDirectory
         /// <summary>
         /// DragDrop
         /// </summary>
-        public static string[] Form_DragDrop(object sender, DragEventArgs e)
+        public static /*string[]*/ void Form_DragDrop(object sender, DragEventArgs e)
         {
             TextBox textBox = sender as TextBox;
             textBox.Text = dragDrop(e);                 // 获取拖入的文件
-            string[] files = textBox.Text.Split(';');
+            //string[] files = textBox.Text.Split(';');
             // 其他处理逻辑
 
-            return files;
+            //return files;
         }
 
         /// <summary>

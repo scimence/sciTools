@@ -5,9 +5,9 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace ClearDirectory
+namespace SciTools
 {
-    class ThreadTool
+    public class ThreadTool
     {
         /// <summary>
         /// 定义委托接口处理函数，用于实时处理cmd输出信息，或传递功能逻辑变量

@@ -1,0 +1,450 @@
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+
+namespace SciTools
+{
+    /// <summary>
+    /// 1、 QRTool.DependentFiles.LoadResourceDll();       // 载入资源dll文件
+    /// 2、 QRTool.DependentFiles.AutoUpdate();            // 应用自动检测更新
+    /// 3、 QRTool.DependentFiles.GetWebConfig("key");     // 载入"key"节点的配置信息
+    /// </summary>
+    class DependentFiles
+    {
+        // 当前命名空间名称
+        private static string NAMESPACE = GetNamespace(Assembly.GetEntryAssembly());
+        //private static string NAMESPACE = "ChannelDemoTool";
+
+        /// <summary>
+        /// 获取Assembly所在的命名空间名称
+        /// </summary>
+        private static string GetNamespace(Assembly asssembly)
+        {
+            string Namespace = "";
+            Type[] types = asssembly.GetTypes();
+            if (types != null && types.Length > 0)
+            {
+                Namespace = types[0].Namespace;
+            }
+            return Namespace;
+        }
+
+        /// <summary>
+        /// 获取当前运行路径
+        /// </summary>
+        public static string curDir()
+        {
+            return AppDomain.CurrentDomain.BaseDirectory;
+        }
+
+        /// <summary>
+        /// 检测目录是否存在，若不存在则创建
+        /// </summary>
+        public static void checkDir(string path)
+        {
+            if (!Directory.Exists(path))
+            {
+                Directory.CreateDirectory(path);
+            }
+        }
+
+        /// <summary>
+        /// 保存Byte数组为文件
+        /// </summary>
+        public static void SaveFile(Byte[] array, string path, bool repalce = false)
+        {
+            if (repalce && System.IO.File.Exists(path)) System.IO.File.Delete(path);    // 若目标文件存在，则替换
+            if (!System.IO.File.Exists(path))
+            {
+                // 创建输出流
+                System.IO.FileStream fs = new System.IO.FileStream(path, System.IO.FileMode.Create);
+
+                //将byte数组写入文件中
+                fs.Write(array, 0, array.Length);
+                fs.Close();
+            }
+        }
+
+        /// <summary>
+        /// 为arg添加引号
+        /// </summary>
+        private static string AddQuotation(string arg)
+        {
+            if (arg.EndsWith("\\") && !arg.EndsWith("\\\\")) arg += "\\";
+            arg = "\"" + arg + "\"";
+
+            return arg;
+        }
+
+        /// <summary>
+        /// 获取Resource资源
+        /// </summary>
+        private static byte[] getResource(string name)
+        {
+            string Namespace = Assembly.GetEntryAssembly().GetTypes()[0].Namespace;
+            System.Resources.ResourceManager rm = new System.Resources.ResourceManager(Namespace + ".Properties.Resources", System.Reflection.Assembly.GetExecutingAssembly());
+            byte[] bytes = (byte[])rm.GetObject(name);
+
+            return bytes;
+        }
+
+
+        /// <summary>
+        /// 获取Updata.exe文件内容
+        /// </summary>
+        private static byte[] getUpdataData()
+        {
+            //string file = @"C:\Users\wangzhongyuan\Documents\visual studio 2012\Projects\GifTool\GifTool\Resources\Update.data";
+            //string data = Encoder.getFileData(file);
+
+            byte[] bytes = Encoder.ToBytes(data);
+            return bytes;
+        }
+
+        // "%~dp0Update.exe" "[CONFIG]https://git.oschina.net/joymeng/channelDemo/raw/master/MD5.txt" "E:\tmp2\Update_Files\\" "渠道计费包\0000001\\"
+        /// <summary>
+        /// 调用Update.exe，更新以perfix为前缀的配置文件
+        /// </summary>
+        public static void updateFiles(string url, string perfix, bool RESTART = false)
+        {
+            string update_EXE = curDir() + "Update.exe";
+
+            //byte[] bytes = getResource("Update");
+            byte[] bytes = getUpdataData();
+
+            if (!File.Exists(update_EXE)) SaveFile(bytes, update_EXE, false);
+            else if (!updateIsRunning()) SaveFile(bytes, update_EXE, true);   // 更新Update.exe
+
+            string path = curDir();
+            url = AddQuotation("[CONFIG]" + url);
+            path = AddQuotation(path);
+            perfix = AddQuotation(perfix);
+            update_EXE = AddQuotation(update_EXE);
+
+            // 调用更新插件执行软件更新逻辑
+            String arg = url + " " + path + " " + perfix;
+            if (RESTART) arg += " " + "RESTART";
+            System.Diagnostics.Process.Start(update_EXE, arg);
+
+            autoDeletUpdateExe();   // 更新后删除update.exe
+        }
+
+        private static Timer timer = null;
+        private static void autoDeletUpdateExe(object sender = null, EventArgs e = null)
+        {
+            string update_EXE = curDir() + "Update.exe";
+            if (!File.Exists(update_EXE)) return;
+
+            if (!updateIsRunning())
+            {
+                File.Delete(update_EXE);
+
+                if (timer != null)
+                {
+                    timer.Stop();
+                    timer = null;
+                }
+            }
+            else
+            {
+                if (timer == null)
+                {
+                    timer = new Timer();
+                    timer.Interval = 700;
+                    timer.Tick += new System.EventHandler(autoDeletUpdateExe);
+                    timer.Start();
+                }
+            }
+        }
+
+        /// <summary>
+        /// 应用自更新,也可更新MD5.txt中配置的任意文件
+        /// </summary>
+        /// <param name="ToolUrl_MD5">工具MD5信息文件的url地址</param>
+        /// <param name="perfix_EXE">当前待更新的应用名称</param>
+        public static void AutoUpdate(string ToolUrl_MD5 = "", string perfix_EXE = "")
+        {
+            if (ToolUrl_MD5.Equals("")) ToolUrl_MD5 = "https://git.oschina.net/scimence/" + NAMESPACE + "/raw/master/MD5.txt";
+            if (perfix_EXE.Equals("")) perfix_EXE = NAMESPACE /*+ ".exe"*/;
+
+            updateFiles(ToolUrl_MD5, perfix_EXE, true);
+        }
+
+        /// <summary>
+        /// 获取指定网址中的配置信息
+        /// </summary>
+        /// <param name="configUrl">配置信息对应网址</param>
+        /// <param name="key">配置节点名</param>
+        public static String GetWebConfig(string key = "", string configUrl = "")
+        {
+            if (configUrl.Equals("")) configUrl = "https://git.oschina.net/scimence/" + NAMESPACE + "/raw/master/config.txt";
+            if (key.Equals("")) return "";
+
+            return WebSettings.getWebData(configUrl, key);
+        }
+
+        /// <summary>
+        /// 打开本地路径
+        /// </summary>
+        public static void openChannelDir(string channelDir)
+        {
+            string localDir = curDir() + channelDir.Replace("/", "\\");
+            checkDir(localDir);
+
+            if (Directory.Exists(localDir))
+            {
+                System.Diagnostics.Process.Start("explorer.exe", "/e, " + localDir);
+            }
+        }
+
+        // 判断当前是有更新任务正在执行
+        public static bool updateIsRunning()
+        {
+            // 获取Update.exe后台进程
+            System.Diagnostics.Process[] processes1 = System.Diagnostics.Process.GetProcessesByName("Update");
+
+            // 无更新进程Update.exe，表示更新完成
+            return (processes1 != null && processes1.Length != 0);
+        }
+
+        /// <summary>
+        /// 载入资源文件中附带的所有dll文件
+        /// </summary>
+        public static void LoadResourceDll()
+        {
+            AppDomain.CurrentDomain.AssemblyResolve += new ResolveEventHandler(CurrentDomain_AssemblyResolve);
+        }
+
+        private static System.Reflection.Assembly CurrentDomain_AssemblyResolve(object sender, ResolveEventArgs args)
+        {
+            string dllName = args.Name.Contains(",") ? args.Name.Substring(0, args.Name.IndexOf(',')) : args.Name.Replace(".dll", "");
+            dllName = dllName.Replace(".", "_");
+            if (dllName.EndsWith("_resources")) return null;
+            string Namespace = Assembly.GetEntryAssembly().GetTypes()[0].Namespace;
+            System.Resources.ResourceManager rm = new System.Resources.ResourceManager(Namespace + ".Properties.Resources", System.Reflection.Assembly.GetExecutingAssembly());
+            byte[] bytes = (byte[])rm.GetObject(dllName);
+            return System.Reflection.Assembly.Load(bytes);
+        }
+
+        // Update.exe文件
+        private static string data = "enfkjaaaadaaaaaaaeaaaaaappppaaaaliaaaaaaaaaaaaaaeaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaiaaaaaaaaobplkaoaaleajmncbliabemmncbfegigjhdcahahcgpghhcgbgncagdgbgogogphecagcgfcahchfgocagjgocaeeepfdcagngpgegfcoananakceaaaaaaaaaaaaaafaefaaaaemabadaajegijffjaaaaaaaaaaaaaaaaoaaaacabalabalaaaadiaaaaaaaiaaaaaaaaaaaahofgaaaaaacaaaaaaagaaaaaaaaaeaaaaacaaaaaaaacaaaaaeaaaaaaaaaaaaaaaeaaaaaaaaaaaaaaaakaaaaaaaacaaaaaaaaaaaaacaaeaifaaaabaaaaabaaaaaaaaabaaaaabaaaaaaaaaaaaabaaaaaaaaaaaaaaaaaaaaaaacmfgaaaaepaaaaaaaagaaaaakaafaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaiaaaaaamaaaaaapefeaaaabmaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaacaaaaaaiaaaaaaaaaaaaaaaaaaaaaaaicaaaaaeiaaaaaaaaaaaaaaaaaaaaaacohegfhiheaaaaaaiedgaaaaaacaaaaaaadiaaaaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaaacaaaaagacohchdhcgdaaaaaakaafaaaaaagaaaaaaaagaaaaaadkaaaaaaaaaaaaaaaaaaaaaaaaaaaaeaaaaaeacohcgfgmgpgdaaaaamaaaaaaaaiaaaaaaaacaaaaaaeaaaaaaaaaaaaaaaaaaaaaaaaaaaaaeaaaaaecaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaagafgaaaaaaaaaaaaeiaaaaaaacaaafaakidkaaaaembkaaaaabaaaaaabnaaaaagpadjaaaaliaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabddaacaacmaaaaaaabaaaabbaahcabaaaahaakaccibbaaaaakbgpoabanajcnbcaaacciacaaaaagalahbpcacibdaaaaagakaaagamclaaaickbddaacaadnaaaaaaacaaaabbaahcabaaaahaakaccibbaaaaakbgpoabanajcncdaaaccibcaaaaakhdbdaaaaakalahgpbeaaaaakakahgpbfaaaaakaaahgpbgaaaaakaaaaagamclaaaickaaaaaabddaafaamiaaaaaaadaaaabbaabggkakadbggkpoabbgpoabamaicnakaaacakagaldikmaaaaaaaaadbpbpgkpoabbgpoabamaicncfaaacbhgkfpcibhaaaaakbgpoabamaicnalaacaaaaaaaiagoakaaclafaabggkakaaagalclhjaaadbggkdcaladbpbpgkpoacbgpoabclabbgaaamaicnacaaaaaaaaachoafaaaaaebpbpgkadfjnejgfpcibhaaaaakbgpoabamaicncgaaachoaeaaaaaebpbpgkadbhgkfifjnejgfphoafaaaaaeadnejgfkcaaaaaaaiagogaakaaclbkaaachoaeaaaaaebpbpgkadfjnejgfphoafaaaaaeadnejgfkakaaagalclaaahckbddaafaaklaaaaaaadaaaabbaabggkakadbggkpoabbgpoabamaicnakaaacakagaldiipaaaaaaaaadbpbpgkpoabbgpoabamaicncfaaaccaaaaaaaiagofpcibhaaaaakbgpoabamaicnahaabhgkakaaclafaabggkakaaagalclfmaaadbggkdcaladbpbpgkpoacbgpoabclabbgaaamaicnacaaaaaaaaaccapopppphpgkfphoafaaaaaeadnejgflakaccaaaaaaaiagofpcibhaaaaakbgpoabamaicnbhaaagcaaaaaaaeagkhoafaaaaaeadbhgkfjnejgflgaakaaagalclaaahckaabddaaeaaboaaaaaaaeaaaabbaabggkakacadciadaaaaagacbpcagkadfjciaeaaaaaggaakagalclaaahckaaaabddaadaankaaaaaaafaaaabbaabggkakbggkalbggkambggkanbggkbdaebggkbdafaccaaaaaaaiagofpanadcaaaaaaaiagofpbdaeaccaaaaaaaeagkfpaladcaaaaaaaeagkfpamaccappppppdpgkfpadcappppppdpgkfpfibdafahaifpcibhaaaaakbgpoabbdahbbahcnbeaabbafcaaaaaaaiagogbajgbbbaegbbdafaaclfnahaigacibhaaaaakbgpoabbdahbbahcnebaabbafcaaaaaaaeagkfpcibhaaaaakbgpoabbdahbbahcnbeaabbafcaaaaaaamagogbajgbbbaegbbdafaaclbcaabbafcaaaaaaaeagkgbajgbbbaegbbdafaaaaclalaabbafajgbbbaegbbdafaabbafakagbdagclaabbagckaaaabddaadaabdaaaaaaaeaaaabbaabggkakacadfpacggaefpgaakagalclaaahckaabddaadaabdaaaaaaaeaaaabbaabggkakacaefpadaeggfpgaakagalclaaahckaabddaacaabaaaaaaaaeaaaabbaabggkakacadgbaegbakagalclaaahckbddaadaabbaaaaaaaeaaaabbaabggkakadacaegggagbakagalclaaahcknkaaacacemadaeafciahaaaaagaoaeciagaaaaagaoagciagaaaaagciagaaaaagffacacemaoafciafaaaaagffacacemadciagaaaaagffcknkaaacacemadaeafciaiaaaaagaoaeciagaaaaagaoagciagaaaaagciagaaaaagffacacemaoafciafaaaaagffacacemadciagaaaaagffcknkaaacacemadaeafciajaaaaagaoaeciagaaaaagaoagciagaaaaagciagaaaaagffacacemaoafciafaaaaagffacacemadciagaaaaagffcknkaaacacemadaeafciakaaaaagaoaeciagaaaaagaoagciagaaaaagciagaaaaagffacacemaoafciafaaaaagffacacemadciagaaaaagffckaaaaaabddaafaamdaaaaaaagaaaabbaabeakbgalbgambeanbgbdaebgbdafbgbdagcibcaaaaakacgpbiaaaaakbdahbbahiogjalahbofibpeaflbhfibpbafkamaiinblaaaaabanbgbdaebgbdafclcnaabbafbkflbdagbbafbkfnbofkbdaeajbbagajbbagjgbbahbbafjbgobbaegkciadaaaaaggajpbbafbhfibdafaabbafahpoaebdajbbajcnmibbafbkflbdagbbafbkfnbofkbdaeajbbagajbbagjgcaiaaaaaaagkbbaegkciadaaaaaggajpajaibifjahgkbjgkciadaaaaagjpajaibhfjahgkbpbngkciaeaaaaagjpajakagbdaiclaabbaickaabddaaeaahnaaaaaaaiaaaabbaahcabaaaahaakbggkalbgambganbgamclfgaaacaibofkgkciaeaaaaaghoaeaaaaaebnjgfpalhcadaaaahaahcibbaaaaagcibjaaaaakgpbkaaaaakbifjanaghcadaaaahaahcibbaaaaagcibjaaaaakajbgdcadajclabbgaagpblaaaaakcibjaaaaakakaaaibhfiamaibjpoacbgpoabbdafbbafcnjnagbdaeclaabbaeckaaaaaabddaacaadcaaaaaaajaaaabbaahcabaaaahaakclbkaaacbpbagkfncibcaaaaagagcibjaaaaakakacbpbagkflbaaaaaacbggkpoacamaicnnnagalclaaahckaaaabddaacaahkaaaaaaakaaaabbaahcabaaaahaakacamaibpapgkdacjaibpakgkdcffaibpakgkfjgjefagaaaaaaacaaaaaaakaaaaaabcaaaaaabkaaaaaaccaaaaaackaaaaaacldahcahaaaahaakcldchcalaaaahaakclckhcapaaaahaakclcchcbdaaaahaakclbkhcbhaaaahaakclbchcblaaaahaakclakapaacibmaaaaakakclaaagalclaaahckaaaabddaahaaghaiaaaaalaaaabbaahcabaaaahaakbgalclekaahoaeaaaaaeahcdaaaaaaaaaaaaaaeaahbhfigmcibnaaaaakcdaaaaaaaaaaaapadpfjciboaaaaakjphoafaaaaaeahcdaaaaaaaaaaaaaaeaahgmcibnaaaaakciboaaaaakjpaaahbhfialahbpbopoacbgpoabbdanbbancnkibeambganbggkbdaebggkbdafbggkbdagbggkbdahbggkbdaibggkbdajbggkbdakbggkbdalacciapaaaaagamcaabcdefghgkbdaicaijklmnopgobdajcaponmlkjigobdakcahgfedcbagkbdalbgandiehahaaaaaabbaibdaebbajbdafbbakbdagbbalbdahbcaibbajbbakbbalaiajjgbngkcahikegknhgocialaaaaagaabcalbbaibbajbbakaiajbhfijgbpamgkcafglhmhoigocialaaaaagaabcakbbalbbaibbajaiajbifijgbpbbgkcanlhacacegkcialaaaaagaabcajbbakbbalbbaiaiajbjfijgbpbggkcaoomolnmbgocialaaaaagaabcaibbajbbakbbalaiajbkfijgbngkcakpaphmpfgocialaaaaagaabcalbbaibbajbbakaiajblfijgbpamgkcackmgihehgkcialaaaaagaabcakbbalbbaibbajaiajbmfijgbpbbgkcabdegdakigocialaaaaagaabcajbbakbbalbbaiaiajbnfijgbpbggkcaabjfegpngocialaaaaagaabcaibbajbbakbbalaiajbofijgbngkcanijiiagjgkcialaaaaagaabcalbbaibbajbbakaiajbpajfijgbpamgkcakppheeilgocialaaaaagaabcakbbalbbaibbajaiajbpakfijgbpbbgkcalbflppppgocialaaaaagaabcajbbakbbalbbaiaiajbpalfijgbpbggkcalonhfmijgocialaaaaagaabcaibbajbbakbbalaiajbpamfijgbngkcaccbbjaglgkcialaaaaagaabcalbbaibbajbbakaiajbpanfijgbpamgkcajdhbjipngocialaaaaagaabcakbbalbbaibbajaiajbpaofijgbpbbgkcaioedhjkggocialaaaaagaabcajbbakbbalbbaiaiajbpapfijgbpbggkcacbaileejgkcialaaaaagaabcaibbajbbakbbalaiajbhfijgblgkcagccfbopggociamaaaaagaabcalbbaibbajbbakaiajbmfijgbpajgkcaealdeamagociamaaaaagaabcakbbalbbaibbajaiajbpalfijgbpaogkcafbfkfocggkciamaaaaagaabcajbbakbbalbbaiaiajjgbpbegkcakkmhlgojgociamaaaaagaabcaibbajbbakbbalaiajblfijgblgkcafnbacpnggociamaaaaagaabcalbbaibbajbbakaiajbpakfijgbpajgkcafdbeeeacgkciamaaaaagaabcakbbalbbaibbajaiajbpapfijgbpaogkcaibogkbnigociamaaaaagaabcajbbakbbalbbaiaiajbkfijgbpbegkcamiplndohgociamaaaaagaabcaibbajbbakbbalaiajbpajfijgblgkcaogmnobcbgkciamaaaaagaabcalbbaibbajbbakaiajbpaofijgbpajgkcangahdhmdgociamaaaaagaabcakbbalbbaibbajaiajbjfijgbpaogkcaihannfpegociamaaaaagaabcajbbakbbalbbaiaiajbofijgbpbegkcaonbefkefgkciamaaaaagaabcaibbajbbakbbalaiajbpanfijgblgkcaafojodkjgociamaaaaagaabcalbbaibbajbbakaiajbifijgbpajgkcapikdoppmgociamaaaaagaabcakbbalbbaibbajaiajbnfijgbpaogkcanjacgpghgkciamaaaaagaabcajbbakbbalbbaiaiajbpamfijgbpbegkcaikemckingociamaaaaagaabcaibbajbbakbbalaiajblfijgbkgkcaecdjpkppgocianaaaaagaabcalbbaibbajbbakaiajbofijgbpalgkcaibpghbihgocianaaaaagaabcakbbalbbaibbajaiajbpalfijgbpbagkcaccgbjngngkcianaaaaagaabcajbbakbbalbbaiaiajbpaofijgbpbhgkcaamdiofpngocianaaaaagaabcaibbajbbakbbalaiajbhfijgbkgkcaeeoklokegocianaaaaagaabcalbbaibbajbbakaiajbkfijgbpalgkcakjmpnoelgkcianaaaaagaabcakbbalbbaibbajaiajbnfijgbpbagkcagaelllpggocianaaaaagaabcajbbakbbalbbaiaiajbpakfijgbpbhgkcahalmlplogocianaaaaagaabcaibbajbbakbbalaiajbpanfijgbkgkcamghojlcigkcianaaaaagaabcalbbaibbajbbakaiajjgbpalgkcapkchkbokgocianaaaaagaabcakbbalbbaibbajaiajbjfijgbpbagkcaifdaopnegocianaaaaagaabcajbbakbbalbbaiaiajbmfijgbpbhgkcaafbniiaegkcianaaaaagaabcaibbajbbakbbalaiajbpajfijgbkgkcadjnanenjgocianaaaaagaabcalbbaibbajbbakaiajbpamfijgbpalgkcaofjjnloggocianaaaaagaabcakbbalbbaibbajaiajbpapfijgbpbagkcapihmkcbpgkcianaaaaagaabcajbbakbbalbbaiaiajbifijgbpbhgkcagffgkmmegocianaaaaagaabcaibbajbbakbbalaiajjgbmgkcaeecccjpegociaoaaaaagaabcalbbaibbajbbakaiajbnfijgbpakgkcajhppckedgkciaoaaaaagaabcakbbalbbaibbajaiajbpaofijgbpapgkcakhcdjeklgociaoaaaaagaabcajbbakbbalbbaiaiajblfijgbpbfgkcadjkajdpmgociaoaaaaagaabcaibbajbbakbbalaiajbpamfijgbmgkcamdfjflgfgkciaoaaaaagaabcalbbaibbajbbakaiajbjfijgbpakgkcajcmmamipgociaoaaaaagaabcakbbalbbaibbajaiajbpakfijgbpapgkcahnpeopppgociaoaaaaagaabcajbbakbbalbbaiaiajbhfijgbpbfgkcanbfnieifgociaoaaaaagaabcaibbajbbakbbalaiajbofijgbmgkcaephokigpgkciaoaaaaagaabcalbbaibbajbbakaiajbpapfijgbpakgkcaoaogcmpogociaoaaaaagaabcakbbalbbaibbajaiajbmfijgbpapgkcabeedabkdgociaoaaaaagaabcajbbakbbalbbaiaiajbpanfijgbpbfgkcakbbbaieogkciaoaaaaagaabcaibbajbbakbbalaiajbkfijgbmgkcaichofdphgociaoaaaaagaabcalbbaibbajbbakaiajbpalfijgbpakgkcadfpcdklngociaoaaaaagaabcakbbalbbaibbajaiajbifijgbpapgkcallncnhckgkciaoaaaaagaabcajbbakbbalbbaiaiajbpajfijgbpbfgkcajbndigolgociaoaaaaagaabbaibbaeciagaaaaagbdaibbajbbafciagaaaaagbdajbbakbbagciagaaaaagbdakbbalbbahciagaaaaagbdalaaajbpbafianajaiiogjpoaebdanbbandkkkpippppadbpcapoabbgpoabbdanbbancnclaabbaicibaaaaaagbbajcibaaaaaagbbakcibaaaaaagbbalcibaaaaaagcibpaaaaakgpcaaaaaakakaaclblaabbajcibaaaaaagbbakcibaaaaaagcibjaaaaakgpcaaaaaakakaaagbdamclaabbamckggbpbpinblaaaaabiaaeaaaaaebpbpinblaaaaabiaafaaaaaeckboaccicbaaaaakckaaaaaabddaabaaapaaaaaaamaaaabbaahcbpaaaahaakagcibiaaaaagaackaabddaacaadfaaaaaaanaaaabbaaaccibbaaaaakcmbfacgpcaaaaaakhcdpaaaahagpccaaaaakbgpoabclabbhaaalahcnbaaaaccicdaaaaakakagcibiaaaaagaaaackaaaaaabldaacaadmaaaaaaaoaaaabbaaacciceaaaaakakaaaganbgbdaeclboajbbaejkalaaaaahgpcfaaaaakaaaanoafamaaaanoaaaaaabbaebhfibdaebbaeajiogjpoaebdafbbafcnnfckabbaaaaaaaaabgaaalcbaaafcaaaaaabbddaacaacpaaaaaaapaaaabbaacicgaaaaakalbcabaccichaaaaakalbcabciciaaaaakakclaacicgaaaaakalbcabciciaaaaakagpoaeamaicnomckaabddaacaacpaaaaaabaaaaabbaaaccibbaaaaakbgpoabamaicnaiaccicdaaaaakbaaaacciceaaaaakakagcmaiagiogjbgpoacclabbgaaalclaaahckboaccicbaaaaakckaabddaacaagnaaaaaabbaaaabbaahdcjaaaaakakaccmalaciogjbgpoacbgpoabclabbhaaanajcnehaaaaacbdaebgbdafcldabbaebbafjkalaaahhcejaaaahagpckaaaaakbgpoabanajcnaibhiaagaaaaaeclaiagahgpclaaaaakaaaabbafbhfibdafbbafbbaeiogjpoaeanajcnmeaaaggpcmaaaaakamclaaaickaaaaaabddaafaabpabaaaabcaaaabbaaaccibmaaaaagbaaahcabaaaahaakhcabaaaahaalhcabaaaahaamhcabaaaahaanaciogjbgpoacbgpoabbdaebbaecnboacbgjkgpcoaaaaakbhinceaaaaabbdafbbafbgbpccjnbbafgpcpaaaaakakaciogjbhpoacbgpoabbdaebbaecnboacbhjkgpcoaaaaakbhinceaaaaabbdafbbafbgbpccjnbbafgpcpaaaaakalaciogjbipoacbgpoabbdaebbaecnboacbijkgpcoaaaaakbhinceaaaaabbdafbbafbgbpccjnbbafgpcpaaaaakamaciogjbjpoacbgpoabbdaebbaecnboacbjjkgpcoaaaaakbhinceaaaaabbdafbbafbgbpccjnbbafgpcpaaaaakanaghcfjaaaahagpdaaaaaakbgpoabbdaebbaecncmaaaghcfjaaaahagpbkaaaaakgpblaaaaakakagahaiajhcglaaaahagpckaaaaakbgpoabcicbaaaaagaaaaclajagahaiciboaaaaagaackaabldaadaadiabaaaabdaaaabbaaaaachcabaaaahagpckaaaaakanajdkbjabaaaaaaadhcabaaaahagpckaaaaakbgpoabanajcnbmcidbaaaaakgpdcaaaaakhchhaaaahaacciddaaaaakcideaaaaakbaabadcibbaaaaakbgpoabanajcnelaaadciabaaaaagakagaegpckaaaaakanajcndaaaadcibkaaaaagbgpoabanajcnbiaaadcibhaaaaagaacdaaaaaaaaaahakheacibjaaaaagaaaaadcidfaaaaakaaaaclafnnjoaaaaaaaaclahadcibpaaaaagaahddgaaaaakaladhcjdaaaahagpccaaaaakbgpoabanajcnefaaahacgpdhaaaaakamaihcjnaaaahagpdiaaaaakcmanaihckbaaaahagpdiaaaaakclabbhaaanajcnbbaihcjnaaaahahckbaaaahagpdjaaaaakamaiadcicaaaaaagcgaaclajahacadgpdkaaaaakaahoagaaaaaebgpoabanajcnbiaacdaaaaaaaaaaeajpeacibjaaaaagaaadcidlaaaaakcgaaaaaanoafcgaaaanoaaaaaackebbmaaaaaaaaaaaaabaaaaaacpabaaaadaabaaaaafaaaaaaabaaaaabbddaabaabkaaaaaaanaaaabbaaaccidmaaaaakakagcidnaaaaakalahcnahagcidoaaaaakcgckaaaabddaadaackaaaaaabeaaaabbaaadbgcidpaaaaakhdeaaaaaakakagacgpebaaaaakaaaggpecaaaaakaaaggpedaaaaakaaadalclaaahckaaaabldaaeaadgadaaaabfaaaabbaaachcabaaaahagpckaaaaakbgpoabbdapbbapcnafdibladaaaaadhcabaaaahagpckaaaaakbgpoabbdapbbapcnbgcidbaaaaakgpdcaaaaakhchhaaaahacibjaaaaakbaabhcabaaaahaakaehckhaaaahagpdiaaaaakbgpoabbdapbbapcnclaaaehckhaaaahagpeeaaaaakalaeahhckhaaaahagpbkaaaaakfigpblaaaaakakaebgahgpefaaaaakbaacaaacciceaaaaagamaihcabaaaahagpckaaaaakbgpoabbdapbbapcnafdiimacaaaaaihcknaaaahabhcicfaaaaaggpcoaaaaakanaihclnaaaahabgcicfaaaaaggpcoaaaaakbdaebbaehckbaaaahahcjnaaaahagpdjaaaaakbhinceaaaaabbdbabbbabgbpakjnbbbagpegaaaaakbdafhdcjaaaaakbdagaabbafbdbbbgbdbcdiepabaaaabbbbbbbcjkbdahaabbahgpcoaaaaakbhinceaaaaabbdbabbbabgbpcjjnbbbagpehaaaaakbdaibbaihcabaaaahagpckaaaaakbgpoabbdapbbapcnafdiajabaaaaaehcmjaaaahagpdiaaaaakbgpoabbdapbbapcnbcaehcmjaaaahahcmnaaaahagpdjaaaaakbaacaehcabaaaahagpckaaaaakcnakbbaiaegpdaaaaaakclabbhaabdapbbapcnafdilpaaaaaahcabaaaahabdajbbaihcnbaaaahagpdiaaaaakbgpoabbdapbbapcncgaabbaihcnbaaaahagpeiaaaaakalbbaiahbhfigpblaaaaakbdajbbaibgahgpefaaaaakbdaiaaadbbaihcmnaaaahahcmjaaaahagpdjaaaaakcibjaaaaakbdakaghcabaaaahagpckaaaaakbdapbbapcncaadbbaiaeaggpdjaaaaakhcmnaaaahahcmjaaaahagpdjaaaaakcibjaaaaakbdakajbbaicibjaaaaakbbakbbajciboaaaaagaaafcmalbbagbbakgpejaaaaakclabbhaabdapbbapcnakbbagbbakgpclaaaaakaaaabbbcbhfibdbcbbbcbbbbiogjpoaebdapbbapdkkapoppppafbgpoabbdapbbapdklhaaaaaaaaadaehcmnaaaahahcmjaaaahagpdjaaaaakcibjaaaaakbdalaghcabaaaahagpckaaaaakbdapbbapcnbiadaghcmnaaaahahcmjaaaahagpdjaaaaakcibjaaaaakbdalbbalciccaaaaagbdambbambhinceaaaaabbdbabbbabgbpdljnbbbagpegaaaaakbdanaabbanbdbbbgbdbccldkbbbbbbbcjkbdaoaaaabbagbbaogpejaaaaakbdapbbapcnbcaabbaocibhaaaaagaabbaocidfaaaaakaaaaaanoafcgaaaanoaaaaaabbbcbhfibdbcbbbcbbbbiogjpoaebdapbbapcnliaabgciekaaaaakaackaaaaabbaaaaaaaaaonaccfbcadafabaaaaabbddaadaaoeaaaaaabgaaaabbaahcabaaaahahdelaaaaakakaccidnaaaaakbgpoabbdahbbahdkljaaaaaaaaacciemaaaaakalaaahbdaibgbdajclcobbaibbajjkamagaggpenaaaaakcmahhcnfaaaahaclafhcabaaaahaaaaicibjaaaaakgpeoaaaaakcgbbajbhfibdajbbajbbaiiogjpoaebdahbbahcnmeacciepaaaaakanaaajbdaibgbdajclenbbaibbajjkbdaeaabbaeciccaaaaagbdafbbafhcabaaaahagpckaaaaakbdahbbahcncdagaggpenaaaaakcmahhcnfaaaahaclafhcabaaaahaaabbafcibjaaaaakgpeoaaaaakcgaabbajbhfibdajbbajbbaiiogjpoaebdahbbahcnkfaaaggpfaaaaaakbdagclaabbagckbobgiaagaaaaaeckbldaacaacnaaaaaabhaaaabbaaaahddgaaaaakakagcidpaaaaakgpfbaaaaakaaagacgpdhaaaaakalahamnoakcgaahcabaaaahaamnoaaaaaickaaaaaaabbaaaaaaaaaabaabpcaaaakcaaaaaabbldaaeaafgaaaaaabiaaaabbaaaaadhcnbaaaahacibjaaaaakakhcnjaaaahaaecnadadclafhcabaaaahaaacibjaaaaakalacaggpeeaaaaakaggpbkaaaaakfiamacahaigpfcaaaaakanacaiajaifjgpefaaaaakbdaenoahcgaaacbdaenoaaaabbaeckaaaaabbaaaaaaaaaabaaekelaaahcaaaaaabboaccicbaaaaakckckaccicbaaaaakaaaaaackaabddaacaadpaaaaaabjaaaabbaahoahaaaaaebecifgaaaaakbgpoabamaicnccaahcnnaaaahanaagaaaaaccifhaaaaakgpfiaaaaakhdfjaaaaakakagiaahaaaaaeaahoahaaaaaealclaaahckaabddaabaaalaaaaaabkaaaabbaahoaiaaaaaeakclaaagckccaaaciaaiaaaaaeckbddaabaaalaaaaaablaaaabbaahoajaaaaaeakclaaagckfghdcmaaaaagciflaaaaakheahaaaaaciaajaaaaaeckboaccifmaaaaakckaaaaaaaaaaaaaaleaaaaaamomkoploabaaaaaajbaaaaaagmfdhjhdhegfgncofcgfhdgphfhcgdgfhdcofcgfhdgphfhcgdgffcgfgbgegfhccmcagnhdgdgphcgmgjgccmcafggfhchdgjgpgodndecodacodacodacmcaedhfgmhehfhcgfdngogfhfhehcgbgmcmcafahfgcgmgjgdelgfhjfegpglgfgodngcdhdhgbdfgddfdgdbdjdddegfdadidjcdfdhjhdhegfgncofcgfhdgphfhcgdgfhdcofchfgohegjgngffcgfhdgphfhcgdgffdgfheacaaaaaaaaaaaaaaaaaaaaaafaebeefaebeefaleaaaaaaecfdekecabaaabaaaaaaaaaaamaaaaaahgdecodacodddadddbdjaaaaaaaaafaagmaaaaaabiakaaaacdhoaaaaieakaaaaaiakaaaacdfdhehcgjgoghhdaaaaaaaaimbeaaaabiabaaaacdfffdaakebfaaaabaaaaaaacdehffejeeaaaaaalebfaaaajiaeaaaacdecgmgpgcaaaaaaaaaaaaaaacaaaaabfhbnkcajajabaaaaaapkcfddaabgaaaaabaaaaaadfaaaaaaahaaaaaaajaaaaaacnaaaaaaeoaaaaaafmaaaaaaaiaaaaaabgaaaaaablaaaaaaacaaaaaaadaaaaaaaeaaaaaaabaaaaaaabaaaaaaacaaaaaaabaaaaaaaaaaakaaabaaaaaaaaaaagaahfaagoaaakaajbaahmaaagaaeiacdhacagaahjacgeacagaamjadkpadagaapeadocadagaaalaeocadagaaciaeocadagaaehaeocadagaagaaeocadagaahjaeocadagaajeaeocadagaakpaeocadagaaohaemiaeagaaplaemiaeagaaajafocadagaaccafocadagaafcafdpafelaaggafaaaaagaajfafhfafagaalfafhfafagaannafndafagaapfafojafagaapoafndafagaaalagndafagaacoaggoaaagaaejaggoaaagaaepaggoaaagaahlaggoaaagaakeagndafakaamfagdpafagaaofaggoaaagaaopaggoaaagaadfahbkahagaaepahgoaaagaaghahgoaaagaahhahgoaaakaamdahliahagaabbaindafagaablaindafagaaecaindafagaaepaindafagaaicaigoaaagaajdaiojafakaaofaimnaiagaapmaidpafagaabjajhfafagaaeeajgoaaagaaejajgoaaagaagnajocadakaajjajidajakaalcajidajakaamhajhmaaaaaaaaaaabaaaaaaaaaaabaaabaaabaabaaabfaabjaaafaaabaaabaaabaabaaacaaabjaaafaaagaabgaaiaabbaaacmaabjaaafaaagaabmaaaaaabaaadeaabjaaafaaahaaceaaaaaabaaaeaaaekaaafaaahaachaaaaabbaaafmaaekaaajaaajaaclaafbiakjaaakaafbialiaaakaafbiamiaaakaabbaaomaacbaabbaapgaacbaabbaamhabggaabbaafiacjcaabbaaifacjgaabbaamjacleaafacaaaaaaaaajgaanhaabmaaabaaiicaaaaaaaaajgaanpaabmaaacaanecaaaaaaaaajbaaaaabcfaaadaakicbaaaaaaaajbaaahabcfaaafaagaccaaaaaaaajbaaaoabcfaaahaaimccaaaaaaaajbaabjabcfaaajaahecdaaaaaaaajbaacfabclaaalaajecdaaaaaaaajbaaclabclaaaoaalecdaaaaaaaajbaadbabclaabbaanacdaaaaaaaajbaadhabclaabeaaoncdaaaaaaaajbaadnabdcaabhaaceceaaaaaaaajbaaeeabdcaaboaaflceaaaaaaaajbaaelabdcaacfaajcceaaaaaaaajbaafcabdcaacmaammceaaaaaaaajbaafjabdoaaddaajmcfaaaaaaaajbaagmabeeaadeaacicgaaaaaaaajbaahgabeeaadfaagicgaaaaaaaajbaahmabeeaadgaapacgaaaaaaaajgaaicabejaadhaahncpaaaaaaaaigbiikabepaadjaagdcpaaaaaaaajbbijeagfdaadjaaiicpaaaaaaaajgaajaabfdaadjaakecpaaaaaaaajgaajfabfhaadjaaoicpaaaaaaaajgaakeabfhaadkaaeadaaaaaaaaajgaalaabfmaadlaahmdaaaaaaaaajgaalgabgbaadmaalhdaaaaaaaaaigbiikabepaadnaamadaaaaaaaaajbaampabgjaadnaadmdbaaaaaaaajbaanlabhaaadoaagidcaaaaaaaajgaaoaabhgaadpaamiddaaaaaaaajbaaolabfhaaecaapaddaaaaaaaajgaapkabhnaaedaacideaaaaaaaajgaaadacidaaefaahmdhaaaaaaaajgaabeacbmaaejaagmdiaaaaaaaajbbijeagfdaaekaahediaaaaaaaajgaacaacbmaaekaamadiaaaaaaaajgaaclacilaaelaadedjaaaaaaaaigbiikabepaaeoaadmdjaaaaaaaaidbiikabepaaeoaaeidjaaaaaaaajdaijfacjkaaeoaajedjaaaaaaaajdaikjacjpaaeoaakldjaaaaaaaajdailfackeaaeoaaledjaaaaaaaajgainjacliaaepaaobdjaaaaaaaaigbiikabepaaepaamldjaaaaaaaajbbijeagfdaaepaaaaaaabaaonacaaaaabaaonacaaaaabaapgacaaaaacaapnacaaaaabaapgacaaaaacaapnacaaaaabaapgacaaaaacaapnacaaaaabaaaiadaaaaacaaaladaaaaabaaaoadaaaaacaabaadaaaaadaabcadaaaaabaaaoadaaaaacaabaadaaaaadaabcadaaaaabaaaoadaaaaacaabaadaaaaadaabcadaaaaabaaaoadaaaaacaabaadaaaaadaabcadaaaaabaabeadaaaaacaabgadaaaaadaabiadaaaaaeaabkadaaaaafaaaoadaaaaagaabmadaaaaahaaboadaaaaabaabeadaaaaacaabgadaaaaadaabiadaaaaaeaabkadaaaaafaaaoadaaaaagaabmadaaaaahaaboadaaaaabaabeadaaaaacaabgadaaaaadaabiadaaaaaeaabkadaaaaafaaaoadaaaaagaabmadaaaaahaaboadaaaaabaabeadaaaaacaabgadaaaaadaabiadaaaaaeaabkadaaaaafaaaoadaaaaagaabmadaaaaahaaboadaaaaabaacbadaaaaabaapgacaaaaabaackadaaaaabaacoadaaaaabaacbadaaaaacaadcadaaaaabaadiadaaaaabaaeaadaaaaabaaemadaaaaabaaeaadaaaaabaafjadaaaaabaafjadaaaaabaafoadbabaacaaonacbabaadaagcadaaaaabaaonacaaaaabaaggadaaaaacaaonacaaaaabaagladbabaacaahfadbabaadaahnadbabaaeaaieadaaaaabaajbadaaaaabaafoadaaaaabaaggadaaaaacaajgadaaaaadaajpadaaaaabaakjadcjaaikabmeaadbaaikabmeaadjaaikabmeaaebaaikabmeaaejaaikabmeaafbaaikabmeaafjaaikabmeaagbaaikabmeaagjaaikabmeaahbaaikabmjaahjaaikabmeaaibaaikabmeaaijaaikabmeaajbaaikabmoaakbaaikabneaakjaaikabepaalbaaocafgbaaljaanjacoaaambaaikabofaamjaabgagomaamjaacaagepaamjaacgagepaanbaadgagpiaaljaaeaagbdabobaafgaghnaaobaafnagckabobaagiagcoabnjaahcagomaaojaaiaageiabnbaaieageoabobaafgagfdabobaaimagomaaajaaikabepaaobaajlaghbabpbaakjagbmaapjaamnaghlabpjaaoaagepaaajabpiagjcabajabaaahjiabajabbaahjpabamaaikabepaaobaadmahhbabamaaedahlkabamaaehahmaabbjabikabepaaobaagcahomaaobaagcahnlabobaagmahhbabcjabibaholabcjabjdahomaapbaakfahbmaaobaafgagpbablbaalbahfhaadbabikabepaadbabmnahpiabobaanmahhbabobaaofahpnabdbabonahadacpjaapkahajacpbaaaaaibmaadjabocafgbaadjabcjaibiacljaadjaioaaaejabikabbpacfbabfkaimeaafbabcaagepaafbabcgagepaaobaagaaicoacobaagiagddacobaagiaidjacobaagoainlabobaahgaicoacamaanmaheaacfjabioaiegacgbabikabmeaadjabkbaigkacgbabfnagckabgbabkkaihaacdjablbaigkacajaahcagomaadbabmaaiijacobaagaaijhacgjabikabadachbabikabepaahjabikabepaaajaadeajogacibabflajomacibabhgajpfacbjaaikabplacjjabikabbaadkjabneajhpadbbaaikabepaaaiaaaeaaanaaaiaaaiaabcaaaiaaamaabhaaaoaaababaaaaaoaaafabaaaaaoaabjabaaaaaoaabnabaaaaacaacbabmcaacjaandacbhadcoaablaanmadcoaacdaapkadcoaaclaaaaaecoaaidaahhaecoaaedaapkadcoaahlaagoaecoaabdaanaadcoaaddaanaadcoaadlaaaoaecoaaalaaiiadcoaafdaapkadcoaaflaacoaecoaaglaafiaecoaahdaagfaeejaandacbhadmdaajlackfacmdaakdacngabmdaaklacngabodaajlaccaadodaaklacngabkaadglabngabnjaapaaapnaaadabaiabbjabakaaddabdmabecabflabgnabhgabicabkdabklabmgabobabapacchacelachhacipacjnacadadaladhkadagaaabaaahaaadaaaaaaeiackkaaaaaambackpaaaaaaofaclnaaacaaciaaadaaacaacjaaafaaabaackaaafaaacaaclaaahaaldabaeiaaaaaacaaaaaaaaaaaaaaaaaaaaaaaaaabjaaaaaaaeaaaaaaaaaaaaaaaaaaaaaaabaagfaaaaaaaaaaaeaaaaaaaaaaaaaaaaaaaaaaabaagoaaaaaaaaaaaaaaaaaaabaaaaaaobajaaaaaaaaaadmengpgehfgmgfdoaaffhagegbhegfcogfhigfaaahpnooaaffhagegbhegfaaakcmcjbnbpcncnaocjcjcgaaakcmcjcbcmblchaabbbpbmanbpcococdcicbcnaaambpcncjcpcmbnbpcnaaffhagegbhegfcofahcgphagfhchegjgfhdaafdgfhehegjgoghhdaagnhdgdgphcgmgjgcaafdhjhdhegfgnaaepgcgkgfgdheaafdhjhdhegfgncoedgpgogggjghhfhcgbhegjgpgoaaebhahagmgjgdgbhegjgpgofdgfhehegjgoghhdecgbhdgfaapladaoanbjaoajbjpkbjplbdaopoaaplbdaopoanbjaoajbjpkbjbbajampnaapladaoanbjaoajbjpkbjbbajampnaappcdcgbpahpnooaacacdcgbpaocjancocmcdcicbaachbjcgajciplcdcocnaachbjcgolakcjdbbpcmaaagancccdcacoaaamancccdcacoaaamcjcoblcobpagbpcacoaapkboboapcicncdcbcibpboaachbooobjppaachbooobjabaachbooobjacaachbooobjadaachbooobjppppaachbooobjababaachbooobjacacaachbooobjadadaapmcjcidabpcmcoaocjbbcjcmbopkcmcmblddaabbcjcmboaocjacbpdcaaaocjacbpdcaacocjccbpdcaapocibncmddckcoaacogdhegphcaacobpcncoaacfcdcgcgakcmcjbnbpcncnpodcbpaacfcdcgcgakcmcjbnbpcncnaabobpcgblddaaakcmcjbnbpcncnadcnamcpcicicdcicbaaampoanaopkamaoaapkciblcgddcnbppkcmcbcnaaahblcdciaacpckboblcobpppcdcgbpaabnccbpbncfpncdcmbpbncocjcmddaaanbldabpppcdcgbpaacpckboblcobpadcicibpcmppcdcgbpcnaacbbpcopkcgcgppcdcgbpcnaacbbpcobbbpbmpnblcoblaacbbpcoaicjbobppnblcoblaafdhjhdhegfgncofcgfhdgphfhcgdgfhdaafcgfhdgphfhcgdgfengbgogbghgfhcaacmbpcncjcpcmbnbpahblciaafdhjhdhegfgncoehgmgpgcgbgmgjhkgbhegjgpgoaaedhfgmhehfhcgfejgogggpaacmbpcncjcpcmbnbppmcpcgcocpcmbpaacbbpcobjambpcncjcpcmbnbpahblciblcbbpcmaacbbpcobjpmcpcgcocpcmbpaacnbpcobjpmcpcgcocpcmbpaapmcpcgcocpcmbpaagegfgggbhfgmheejgohdhegbgogdgfaaghgfhefpeegfgggbhfgmheaaeegfgggbhfgmheaacacdcgbpakblcoccaacgbablcgcpbpaacdancccdcacoplcdcocnaacgbcaacgbdaadcaaddaadeaablaabmaabnaaboaacnaablbnaacnahbpcncnblcbbpaabobpbnaaccbpdcaacncoddckbpaabpdcbpppcdcgbpaackcmcjbnbpcncnaiblchbpaaahcdcgcgcdcnbpbncjcibocnaablcmcbcnaacpcmcgaachboooaaboblcoblaabncjcicacdcbapcmcgaabocdcmakblcoccaackbpcmcacddcaabobpcgbpcoajcmcoccbpcmcnaackblcoccaacicjbobpaiblchbpaacacdciblcgaicjbobpaadablcgcpbpaafdhjhdhegfgncofchfgohegjgngfcofggfhchdgjgpgogjgoghaafegbhcghgfheeghcgbgngfhhgphcglebhehehcgjgchfhegfaafdhjhdhegfgncofcgfgggmgfgdhegjgpgoaaebhdhdgfgngcgmhjfegjhegmgfebhehehcgjgchfhegfaaebhdhdgfgngcgmhjeegfhdgdhcgjhahegjgpgoebhehehcgjgchfhegfaaebhdhdgfgngcgmhjedgpgogggjghhfhcgbhegjgpgoebhehehcgjgchfhegfaaebhdhdgfgngcgmhjedgpgnhagbgohjebhehehcgjgchfhegfaaebhdhdgfgngcgmhjfahcgpgehfgdheebhehehcgjgchfhegfaaebhdhdgfgngcgmhjedgphahjhcgjghgiheebhehehcgjgchfhegfaaebhdhdgfgngcgmhjfehcgbgegfgngbhcglebhehehcgjgchfhegfaaebhdhdgfgngcgmhjedhfgmhehfhcgfebhehehcgjgchfhegfaafdhjhdhegfgncofchfgohegjgngfcoejgohegfhcgphafdgfhchggjgdgfhdaaedgpgnfggjhdgjgcgmgfebhehehcgjgchfhegfaaehhfgjgeebhehehcgjgchfhegfaaebhdhdgfgngcgmhjfggfhchdgjgpgoebhehehcgjgchfhegfaaebhdhdgfgngcgmhjeggjgmgffggfhchdgjgpgoebhehehcgjgchfhegfaafdhjhdhegfgncoeegjgbghgogphdhegjgdhdaaeegfgchfghghgbgcgmgfebhehehcgjgchfhegfaaeegfgchfghghgjgoghengpgegfhdaafdhjhdhegfgncofchfgohegjgngfcoedgpgnhagjgmgfhcfdgfhchggjgdgfhdaaedgpgnhagjgmgbhegjgpgofcgfgmgbhigbhegjgpgohdebhehehcgjgchfhegfaafchfgohegjgngfedgpgnhagbhegjgcgjgmgjhehjebhehehcgjgchfhegfaafdhjhdhegfgncoejepaaeggjgmgfaaefhigjhdhehdaafdhjhdhegfgncofegfhiheaaefgogdgpgegjgoghaafdhehcgfgbgnfcgfgbgegfhcaafegfhihefcgfgbgegfhcaafcgfgbgefegpefgogeaaedgmgphdgfaaeegjhdhagphdgfaaedgpgohggfhcheaafegpecgpgpgmgfgbgoaaehgfheechjhegfhdaaejgohedgdeaafdhehcgjgoghaaedgpgogdgbheaaghgfhefpemgfgoghhegiaafdhfgchdhehcgjgoghaafegpfdhehcgjgoghaaengbhegiaafagphhaafegpejgohedgdeaafegpemgphhgfhcaacogdgdhegphcaaefgogehdfhgjhegiaafagbhegiaaehgfheeggjgmgfeogbgngffhgjhegigphfheefhihegfgohdgjgpgoaafahcgpgdgfhdhdaaehgfhefahcgpgdgfhdhdgfhdechjeogbgngfaaelgjgmgmaaefhigdgfhahegjgpgoaaeegbhegffegjgngfaaghgfhefpeogphhaaebgegeengjgmgmgjhdgfgdgpgogehdaaghgfhefpfegjgdglhdaafdhjhdhegfgncoedgpgmgmgfgdhegjgpgohdcoehgfgogfhcgjgdaaemgjhdhegadbaaefhbhfgbgmhdaaebgegeaafegpebhchcgbhjaafdfeebfegihcgfgbgeebhehehcgjgchfhegfaafehcgjgnaaedgigbhcaafdhegbhchehdfhgjhegiaaebhahaeegpgngbgjgoaaghgfhefpedhfhchcgfgoheeegpgngbgjgoaaghgfhefpecgbhdgfeegjhcgfgdhegphchjaaehgfheeggjgmgfeogbgngfaaeegfgmgfhegfaafdhjhdhegfgncoeogfheaafhgfgcedgmgjgfgoheaaeegphhgogmgpgbgefdhehcgjgoghaaedgpgohegbgjgohdaafcgfhagmgbgdgfaaeegphhgogmgpgbgeeggjgmgfaafdhegbhcheaaehgfheeegjhcgfgdhegphchjeogbgngfaaeegjhcgfgdhegphchjaaeegjhcgfgdhegphchjejgogggpaaedhcgfgbhegfeegjhcgfgdhegphchjaaghgfhefpfffeegdiaafdhehcgfgbgnfhhcgjhegfhcaafegfhihefhhcgjhegfhcaafhhcgjhegfaaejgogegfhiepggaafdhagmgjheaafehcgjgnefgogeaaemgbhdheejgogegfhiepggaaefgohggjhcgpgogngfgoheaaefhigjheaafdhehcgjgoghechfgjgmgegfhcaaehgfheeggjgmgfhdaaebhahagfgogeaaehgfheeegjhcgfgdhegphcgjgfhdaahdgfhefpefgogdgpgegjgoghaafdhjhdhegfgncoedgpgegfeegpgncoedgpgnhagjgmgfhcaaehgfgogfhcgbhegfgeedgpgegfebhehehcgjgchfhegfaaeegfgchfghghgfhceogpgoffhdgfhcedgpgegfebhehehcgjgchfhegfaaedgpgnhagjgmgfhcehgfgogfhcgbhegfgeebhehehcgjgchfhegfaafcgfgggfhcgfgogdgfefhbhfgbgmhdaafehjhagfaafchfgohegjgngffehjhagfeigbgogegmgfaaehgfhefehjhagfeghcgpgneigbgogegmgfaaebhdhdgfgngcgmhjaaghgfhefpebhdhdgfgngcgmhjaafdhjhdhegfgncoedgpgnhagpgogfgoheengpgegfgmaaefgegjhegphcechcgphhhdgbgcgmgfebhehehcgjgchfhegfaaefgegjhegphcechcgphhhdgbgcgmgffdhegbhegfaafdgfhehegjgoghhdecgbhdgfaafdhjgogdgihcgpgogjhkgfgeaaffhagegbhegfcofahcgphagfhchegjgfhdcofcgfhdgphfhcgdgfhdcohcgfhdgphfhcgdgfhdaaaaaaabaaaddaaaaaadgbaaaaadgcaaaaadgdaaaaadgeaaaaadgfaaaaadggaaaabpedaagiaagbaahcaaghaagfaaenaagpaageaahfaagmaagfaafpaafgaadeaaaaajcoaagfaahiaagfaaaaapfcaaefaafdaafeaaebaafcaafeaaaabbflaaedaaepaaeoaaegaaejaaehaafnaaaaalggaagbaagmaahdaagfaaaablffaahaaageaagbaaheaagfaafpaaegaagjaagmaagfaahdaafmaaaaajcoaaheaahiaaheaaaaadakaaaaafanaaakaaaaafcnaadoaaabapanghkbfcgifgeeinjagooohgfffpabaliffppegglagfihgfpgeoabadfmaaaaadcpaaaaadciaaaaaddlaaaaadcjaaaadhffaahaaageaagbaaheaagfaacoaafaaahcaagpaahaaagfaahcaaheaagjaagfaahdaacoaafcaagfaahdaagpaahfaahcaagdaagfaahdaaaaaaaaaamcboonmpgpkpbkelilgoeckbblgacjhfaaailhhkfmfgbjdeoaijacagaiaeaiaaaaaaaeaeaaaaaaaecaaaaaaaaeaaabaoaoadagbnakafaaacakakakagaaadakakakakalaaahabbaakakakakakakakafaaabbnakaoaeaaabaoakafaaacaoaoaiadcaaaabadaaaaabaeaaababaoaeaaababanaeaaabacaoacagacagaaabbnaobnaoafaaababbnaoagaaadabaoaoaoafaaacaoaoaoahaaaeabaoaoaoacagaaadaoaoaoacadagbcanadagbcbbaeaaaabcanaeaaaabcbbafaaababbcbbaeaiaabcanaeaiaabcbbadagbcbmaeaaaabcbmaeaiaabcbmababaecaababaoaecaababacafcaababbbenaecaababaiagahaeaoaoaoacaeaaaabcfnagcaacabaobcfnadcaaaaoahahaeaobcgbaoacaeaaabacakafahadakakacaeahacakakakahaiakakakakakakakacafcaabbnafaobaahakbnakaiaibnakaiaiaibnafbnakacadcaaaaiaecaabaoaiaiahagaoakaiaiaoacafahadaoaoacafahadaoaoakafaaacanananaeaaabakanahaaaeaoaoaoaoaobbahaoaoaibnakaiakakakakakakakakaoacadahabaoaecaabacaoaeahacaoacagaaabbnbchnaoapahagbnbchnbchnbciaibbnbchnaiacafaaaabbiaifagcaabbbiaifanadcaaaakahahadakbbiaifacahahadbnbchnacacagbfbciaijabaoafcaababbdaaafcaaabnbdaaapahagbfbciaijabaoaobnaoacbnaoaiaeabaaaaaaafcaabaobnadajahagaoaoaoaoacbnadafaaaabciajfagaaadaoaoaoaoaecaabaoaoafcaacaoaoaoafcaacabaoaoafaaabbchnaoaiahaeaobciajjaoacagaaabbciakbaoahcaadabaoacbcfnagahacbciakfaoaecaabaiaoafcaacaoaiaiagcaabbnaobnadafcaabacbdaaaeaaababaiboahbdaoaiaoaoaobnaobfbciaijabaoaoaoaoaoaoaobnaoaoacbnadbnaoaiafaaabbnaoaoagcaabbcialbaobbahakbcialbbnaoaobnaoaoaoaoacbnaoaiafcaababbcfnahahadbciajjaoaoafcaacaiaoaiahahafaoaoaiaiaoeaabaaddfdhjhdhegfgncofcgfhdgphfhcgdgfhdcofegpgpgmhdcofdhehcgpgoghgmhjfehjhagfgefcgfhdgphfhcgdgfechfgjgmgegfhcahdecodacodacodaaaaaafaaacacbmbmaiaaabbciambbbiamfafcaaabciamjahcaacabaobciamjahahadbcanbcanacaeahabbcbbagcaababbbianbaiabaaacaaaaaaaaaafjabaaelengjgdhcgphdgpgghecofggjhdhfgbgmfdhehfgegjgpcoefgegjhegphchdcofdgfhehegjgoghhdeegfhdgjghgogfhccofdgfhehegjgoghhdfdgjgoghgmgfeggjgmgfehgfgogfhcgbhegphcaidbdbcodacodacodaaaaaaeahabbcbmaiaaabbcianfbcianfehabaabkcoeoeffeeghcgbgngfhhgphcglcmfggfhchdgjgpgodnhgdecodaabaafeaobeeghcgbgngfhhgphcgleegjhdhagmgbhjeogbgngfbacoeoeffecaeghcgbgngfhhgphcglcadealabaaagffhagegbhegfaaaabnabaabiogjgihoelllgogjlleogjglaoiloifofikkjoflhkfofiflhaaaaafabaaaaaaaaanabaaaifdgdgjgngfgogdgfaaaabpabaabkedgphahjhcgjghgihecamckjcafdgdgjgngfgogdgfcadcdadbdhaaaacjabaacededgdgdadedhdddccndhgcdagccndedidggecndjdbdddfcngddgdedfggggdddggegddjdiaaaaamabaaahdccodacodacodaaaaaaiabaaahabaaaaaaaaaiabaaaiaaaaaaaaaaboabaaabaafeacbgfhhcgbhaeogpgoefhigdgfhahegjgpgofegihcgphhhdabaaaaaaaaaaaajegijffjaaaaaaaaacaaaaaabmabaaaabaffaaaabadhaaaafcfdeefdklekaebcijacbhekjghdlkdmjglkihpecaaaaaaagedkfmhdgdgjfmfggjhdhfgbgmcafdhehfgegjgpcadcdadadifmfahcgpgkgfgdhehdfmffhagegbhegffmffhagegbhegffmgpgcgkfmeegfgchfghfmffhagegbhegfcohagegcaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaafefgaaaaaaaaaaaaaaaaaaaagofgaaaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaagafgaaaaaaaaaaaaaaaaaaaaaaaafpedgphcefhigfengbgjgoaagnhdgdgphcgfgfcogegmgmaaaaaaaaaappcfaacaeaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaacaabaaaaaaacaaaaaiabiaaaaaadiaaaaiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabaaabaaaaaafaaaaaiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabaaabaaaaaagiaaaaiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabaaaaaaaaaaiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabaaaaaaaaaajaaaaaaakagaaaaabaadaaaaaaaaaaaaaaaaaaaalagdaaaaokabaaaaaaaaaaaaaaaaaaaabaaddeaaaaaafgaafdaafpaafgaaefaafcaafdaaejaaepaaeoaafpaaejaaeoaaegaaepaaaaaaaaaalnaeoppoaaaaabaaaaaaacaaaaaaaaaaaaaaacaaaaaaaaaadpaaaaaaaaaaaaaaaeaaaaaaabaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaeeaaaaaaabaafgaagbaahcaaegaagjaagmaagfaaejaagoaaggaagpaaaaaaaaaaceaaaeaaaaaafeaahcaagbaagoaahdaagmaagbaaheaagjaagpaagoaaaaaaaaaaaaaalaaehaacaaaaabaafdaaheaahcaagjaagoaaghaaegaagjaagmaagfaaejaagoaaggaagpaaaaaaemacaaaaabaadaaadaaadaaadaaadaaadeaagcaadaaaaaaacmaaajaaabaaedaagpaagnaagnaagfaagoaaheaahdaaaaaaihgfpgeopegglagfifipkjfcoffnhhfbaaaaaaaadeaaajaaabaaedaagpaagnaahaaagbaagoaahjaaeoaagbaagnaagfaaaaaaaaaafdaagdaagjaagnaagfaagoaagdaagfaaaaaaaaaadiaaahaaabaaegaagjaagmaagfaaeeaagfaahdaagdaahcaagjaahaaaheaagjaagpaagoaaaaaaaaaaffaahaaageaagbaaheaagfaaaaaaaaaadaaaaiaaabaaegaagjaagmaagfaafgaagfaahcaahdaagjaagpaagoaaaaaaaaaadcaacoaadaaacoaadaaacoaadaaaaaaadiaaalaaabaaejaagoaaheaagfaahcaagoaagbaagmaaeoaagbaagnaagfaaaaaaffaahaaageaagbaaheaagfaacoaagfaahiaagfaaaaaaaaaafiaabkaaabaaemaagfaaghaagbaagmaaedaagpaahaaahjaahcaagjaaghaagiaaheaaaaaaedaagpaahaaahjaahcaagjaaghaagiaaheaacaaakjaacaaafdaagdaagjaagnaagfaagoaagdaagfaacaaadcaadaaadbaadhaaaaaaeaaaalaaabaaepaahcaagjaaghaagjaagoaagbaagmaaegaagjaagmaagfaagoaagbaagnaagfaaaaaaffaahaaageaagbaaheaagfaacoaagfaahiaagfaaaaaaaaaadaaaahaaabaafaaahcaagpaageaahfaagdaaheaaeoaagbaagnaagfaaaaaaaaaaffaahaaageaagbaaheaagfaaaaaaaaaadeaaaiaaabaafaaahcaagpaageaahfaagdaaheaafgaagfaahcaahdaagjaagpaagoaaaaaadcaacoaadaaacoaadaaacoaadaaaaaaadiaaaiaaabaaebaahdaahdaagfaagnaagcaagmaahjaacaaafgaagfaahcaahdaagjaagpaagoaaaaaadcaacoaadaaacoaadaaacoaadaaaaaaaoplllpdmdphigngmcahggfhchdgjgpgodnccdbcodacccagfgogdgpgegjgoghdnccfffeegcndicccahdhegbgogegbgmgpgogfdncchjgfhdccdpdoanakdmgbhdhdgfgngcgmhjcahigngmgohddncchfhcgodkhdgdgigfgngbhdcngngjgdhcgphdgpgghecngdgpgndkgbhdgncohgdbcccagngbgogjgggfhdhefggfhchdgjgpgodnccdbcodaccdoanakcacadmgbhdhdgfgngcgmhjejgegfgohegjhehjcahggfhchdgjgpgodnccdbcodacodacodacccagogbgngfdnccenhjebhahagmgjgdgbhegjgpgocogbhahacccpdoanakcacadmhehchfhdheejgogggpcahigngmgohddncchfhcgodkhdgdgigfgngbhdcngngjgdhcgphdgpgghecngdgpgndkgbhdgncohgdcccdoanakcacacacadmhdgfgdhfhcgjhehjdoanakcacacacacacadmhcgfhbhfgfhdhegfgefahcgjhggjgmgfghgfhdcahigngmgohddncchfhcgodkhdgdgigfgngbhdcngngjgdhcgphdgpgghecngdgpgndkgbhdgncohgddccdoanakcacacacacacacacadmhcgfhbhfgfhdhegfgeefhigfgdhfhegjgpgoemgfhggfgmcagmgfhggfgmdnccgbhdejgohggpglgfhccccahfgjebgdgdgfhdhddnccgggbgmhdgfcccpdoanakcacacacacacadmcphcgfhbhfgfhdhegfgefahcgjhggjgmgfghgfhddoanakcacacacadmcphdgfgdhfhcgjhehjdoanakcacadmcphehchfhdheejgogggpdoanakdmcpgbhdhdgfgngcgmhjdoanakaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaafaaaaaamaaaaaaiadgaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    }
+
+    // 示例：scimence( Name1(6JSO-F2CM-4LQJ-JN8P) )scimence
+    // string url = "https://git.oschina.net/scimence/easyIcon/wikis/OnlineSerial";
+    // 
+    // string data = getWebData(url);
+    // string str1 = getNodeData(data, "scimence", false);
+    // string str2 = getNodeData(str1, "Name1", true);
+
+    /// <summary>
+    /// 此类用于获取，在网络文件中的配置信息
+    /// </summary>
+    public class WebSettings
+    {
+        #region 网络数据的读取
+
+        /// <summary>
+        /// 获取url页面，key(**value**)中的value数据
+        /// </summary>
+        public static string getWebData(string url, string key)
+        {
+            string data = getWebData(url);
+            string str1 = getNodeData(data, key, true);
+
+            return str1;
+        }
+
+        //从给定的网址中获取数据
+        public static string getWebData(string url)
+        {
+            try
+            {
+                System.Net.WebClient client = new System.Net.WebClient();
+                client.Encoding = System.Text.Encoding.UTF8;
+                string data = client.DownloadString(url);
+                return data;
+            }
+            catch (Exception) { return ""; }
+        }
+
+        #endregion
+
+
+        // 从自定义格式的数据data中，获取key对应的节点数据
+        //p>scimence(&#x000A;NeedToRegister(false)NeedToRegister&#x000A;RegisterPrice(1)RegisterPrice&#x000A;)scimence</p>&#x000A;</div>
+        // NeedToRegister(false)&#x000A;RegisterPrice(1)   finalNode的数据格式
+        public static string getNodeData(string data, string key, bool finalNode)
+        {
+            try
+            {
+                string S = key + "(", E = ")" + (finalNode ? "" : key);
+                int indexS = data.IndexOf(S) + S.Length;
+                int indexE = data.IndexOf(E, indexS);
+
+                return data.Substring(indexS, indexE - indexS);
+            }
+            catch (Exception) { return data; }
+        }
+    }
+
+    public class Encoder
+    {
+        public static void example()
+        {
+            String data = "test encode";
+            string encode = Encode(data);
+            string decode = Decode(encode);
+            bool b = data.Equals(decode);
+            bool b2 = b;
+        }
+
+        /// <summary>  
+        /// 转码data为全字母串，并添加前缀  
+        /// </summary>  
+        public static string Encode(string data)
+        {
+            string str = data;
+            if (!data.StartsWith("ALPHABETCODE@"))
+            {
+                str = "ALPHABETCODE@" + EncodeAlphabet(data);
+            }
+            return str;
+        }
+
+
+        /// <summary>  
+        /// 解析字母串为原有串  
+        /// </summary>  
+        public static string Decode(string data)
+        {
+            string str = data;
+            if (data.StartsWith("ALPHABETCODE@"))
+            {
+                str = DecodeAlphabet(data.Substring("ALPHABETCODE@".Length));
+            }
+            return str;
+        }
+
+        /// <summary>
+        /// 获取文件对应的编码字符串
+        /// </summary>
+        public static string getFileData(string file)
+        {
+            byte[] bytes = File2Bytes(file);
+            string data = ToStr(bytes);
+
+            return data;
+        }
+
+        /// <summary>  
+        /// 将文件转换为byte数组  
+        /// </summary>  
+        /// <param name="path">文件地址</param>  
+        /// <returns>转换后的byte数组</returns>  
+        public static byte[] File2Bytes(string path)
+        {
+            if (!File.Exists(path))
+            {
+                return new byte[0];
+            }
+
+            FileInfo fi = new FileInfo(path);
+            byte[] buff = new byte[fi.Length];
+
+            FileStream fs = fi.OpenRead();
+            fs.Read(buff, 0, Convert.ToInt32(fs.Length));
+            fs.Close();
+
+            return buff;
+        }
+
+        /// <summary>  
+        /// 获取文件中的数据,自动判定编码格式
+        /// </summary>  
+        private static string fileToString(String filePath)
+        {
+            byte[] bytes = File2Bytes(filePath);
+            string str = Encoding.UTF8.GetString(bytes);
+
+            return str;
+        }
+
+        # region 字符串字母编码逻辑
+
+        /// <summary>  
+        /// 转化为字母字符串  
+        /// </summary>  
+        public static string EncodeAlphabet(string data)
+        {
+            byte[] B = Encoding.UTF8.GetBytes(data);
+            return ToStr(B);
+        }
+
+        /// <summary>  
+        /// 每个字节转化为两个字母  
+        /// </summary>  
+        private static string ToStr(byte[] B)
+        {
+            StringBuilder Str = new StringBuilder();
+            foreach (byte b in B)
+            {
+                Str.Append(ToStr(b));
+            }
+            return Str.ToString();
+        }
+
+        private static string ToStr(byte b)
+        {
+            return "" + ToChar(b / 16) + ToChar(b % 16);
+        }
+
+        private static char ToChar(int n)
+        {
+            return (char)('a' + n);
+        }
+
+        /// <summary>  
+        /// 解析字母字符串  
+        /// </summary>  
+        public static string DecodeAlphabet(string data)
+        {
+            byte[] B = ToBytes(data);
+            return Encoding.UTF8.GetString(B);
+        }
+
+        /// <summary>  
+        /// 解析字符串为Bytes数组
+        /// </summary>  
+        public static byte[] ToBytes(string data)
+        {
+            byte[] B = new byte[data.Length / 2];
+            char[] C = data.ToCharArray();
+
+            for (int i = 0; i < C.Length; i += 2)
+            {
+                byte b = ToByte(C[i], C[i + 1]);
+                B[i / 2] = b;
+            }
+
+            return B;
+        }
+
+        /// <summary>  
+        /// 每两个字母还原为一个字节  
+        /// </summary>  
+        private static byte ToByte(char a1, char a2)
+        {
+            return (byte)((a1 - 'a') * 16 + (a2 - 'a'));
+        }
+
+        # endregion
+
+    }
+
+}
